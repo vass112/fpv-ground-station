@@ -1,0 +1,757 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FPV-1 Ground Station</title>
+<style>
+  :root{
+    --ground:#0b0d0e;
+    --panel:#121516;
+    --panel-2:#171b1d;
+    --line:#262c2e;
+    --ink:#e8ecec;
+    --ink-dim:#9aa3a3;
+    --ink-faint:#8b9393;
+    --rec:#ff3b30;
+    --lock:#2ecc71;
+    --warn:#ffb340;
+    --focus:#7dd3fc;
+    --mono:ui-monospace,"Cascadia Mono","SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--ground);color:var(--ink);font-family:var(--sans);
+    min-height:100vh;display:flex;flex-direction:column;
+  }
+  ::selection{background:var(--warn);color:#111}
+  :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-track{background:var(--ground)}
+  ::-webkit-scrollbar-thumb{background:#2e3537;border:2px solid var(--ground)}
+  button{font-family:inherit}
+
+  /* ---------- top strip ---------- */
+  header{
+    display:flex;align-items:center;gap:16px;
+    padding:12px 20px;border-bottom:1px solid var(--line);
+    background:var(--panel);flex-wrap:wrap;
+  }
+  header h1{
+    font-size:1.05rem;font-weight:800;letter-spacing:.14em;margin:0;
+    text-transform:uppercase;white-space:nowrap;
+  }
+  header h1 .unit{color:var(--ink-faint);font-weight:600}
+  .timecode{
+    font-family:var(--mono);font-size:1.6rem;font-weight:700;
+    font-variant-numeric:tabular-nums;letter-spacing:.04em;
+    margin-left:auto;
+  }
+  .badge{
+    font-family:var(--mono);font-size:.72rem;font-weight:700;letter-spacing:.12em;
+    padding:5px 10px;border:1px solid var(--line);text-transform:uppercase;
+    display:inline-flex;align-items:center;gap:7px;white-space:nowrap;
+  }
+  .lamp{width:9px;height:9px;background:var(--ink-faint);flex:none}
+  .lamp.on{background:var(--lock);box-shadow:0 0 8px rgba(46,204,113,.8)}
+  .lamp.bad{background:var(--rec);box-shadow:0 0 8px rgba(255,59,48,.8)}
+  .lamp.warn{background:var(--warn);box-shadow:0 0 8px rgba(255,179,64,.8)}
+  .badge.demo{color:var(--warn);border-color:#4a3a1e}
+  .badge.live{color:var(--lock);border-color:#1e4a33}
+
+  /* ---------- layout ---------- */
+  main{
+    flex:1;display:grid;gap:0;
+    grid-template-columns:minmax(0,1fr) 340px;
+    min-height:0;
+  }
+  .program{
+    padding:20px;display:flex;flex-direction:column;gap:14px;min-width:0;
+    border-right:1px solid var(--line);
+  }
+  .sidebar{
+    background:var(--panel);display:flex;flex-direction:column;min-width:0;
+  }
+
+  /* ---------- monitor ---------- */
+  .monitor{
+    position:relative;background:#000;border:1px solid var(--line);
+    aspect-ratio:4/3;max-height:calc(100vh - 320px);min-height:280px;
+    display:flex;align-items:center;justify-content:center;overflow:hidden;
+  }
+  .monitor img{width:100%;height:100%;object-fit:contain;display:none}
+  .monitor.live img{display:block}
+  .monitor .scrim{
+    position:absolute;inset:0;display:flex;flex-direction:column;
+    align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px;
+  }
+  .monitor.live .scrim{display:none}
+  .scrim svg{width:44px;height:44px;stroke:var(--ink-faint);fill:none;stroke-width:1.5}
+  .scrim h2{margin:0;font-size:1.3rem;font-weight:800;letter-spacing:.1em}
+  .scrim p{margin:0;color:var(--ink-dim);font-size:.9rem;max-width:100%;line-height:1.55;overflow-wrap:anywhere}
+  .scrim > *{min-width:0}
+  .scrim p code{font-family:var(--mono);color:var(--ink);font-size:.85em}
+  .spin{
+    width:34px;height:34px;border:3px solid var(--line);border-top-color:var(--ink);
+    animation:rot 0.9s linear infinite;
+  }
+  @keyframes rot{to{transform:rotate(360deg)}}
+  .monitor .tally{
+    position:absolute;top:0;left:0;right:0;height:4px;background:transparent;
+  }
+  .monitor.recording .tally{background:var(--rec);box-shadow:0 0 12px rgba(255,59,48,.9)}
+  .rec-dot{
+    position:absolute;top:12px;left:12px;display:none;align-items:center;gap:8px;
+    font-family:var(--mono);font-size:.8rem;font-weight:700;letter-spacing:.1em;
+    background:rgba(0,0,0,.65);padding:6px 10px;
+  }
+  .monitor.recording .rec-dot{display:inline-flex}
+  .rec-dot i{width:10px;height:10px;background:var(--rec);animation:blink 1.1s steps(2,start) infinite}
+  @keyframes blink{to{visibility:hidden}}
+  .osd{
+    position:absolute;left:0;right:0;bottom:0;display:none;
+    padding:8px 14px;background:rgba(0,0,0,.62);
+    font-family:var(--mono);font-size:.82rem;
+    font-variant-numeric:tabular-nums;
+    display:none;gap:18px;flex-wrap:wrap;
+  }
+  .monitor.live .osd{display:flex}
+  .osd b{color:var(--ink-dim);font-weight:600;margin-right:6px}
+  .osd .bad{color:var(--rec)} .osd .good{color:var(--lock)} .osd .wrn{color:var(--warn)}
+
+  /* ---------- connect bar ---------- */
+  .connectbar{display:flex;gap:10px;flex-wrap:wrap}
+  .connectbar input{
+    flex:1;min-width:220px;background:var(--panel-2);border:1px solid var(--line);
+    color:var(--ink);font-family:var(--mono);font-size:.85rem;padding:11px 12px;
+  }
+  .connectbar input::placeholder{color:var(--ink-faint)}
+
+  /* ---------- buttons ---------- */
+  .btn{
+    appearance:none;border:1px solid #3a4244;background:#1d2224;color:var(--ink);
+    font-size:.78rem;font-weight:800;letter-spacing:.12em;text-transform:uppercase;
+    padding:11px 18px;cursor:pointer;
+  }
+  .btn:hover:not(:disabled){background:#262d2f;border-color:#4a5456}
+  .btn:disabled{opacity:.38;cursor:not-allowed}
+  .btn.arm-armed{background:#3a1414;border-color:var(--rec);color:#ffb3ad}
+  .btn.rec-on{background:var(--rec);border-color:var(--rec);color:#fff}
+  .btn.primary{border-color:#4a5456}
+
+  /* ---------- transport ---------- */
+  .transport{
+    display:flex;gap:10px;align-items:stretch;flex-wrap:wrap;
+    padding:14px;background:var(--panel);border:1px solid var(--line);
+  }
+  .transport .tc{
+    font-family:var(--mono);font-size:1.15rem;font-weight:700;
+    font-variant-numeric:tabular-nums;background:#000;border:1px solid var(--line);
+    padding:10px 16px;display:flex;align-items:center;letter-spacing:.05em;
+  }
+  .transport .tc small{color:var(--ink-faint);font-size:.65rem;margin-right:10px;letter-spacing:.14em}
+  .cap-note{font-size:.78rem;color:var(--ink-faint);line-height:1.5;flex-basis:100%}
+  .cap-note code{font-family:var(--mono);color:var(--ink-dim)}
+
+  /* ---------- track sheet ---------- */
+  .sheet{padding:6px 0}
+  .sheet h2, .log h2, .camsheet h2{
+    font-size:.72rem;font-weight:800;letter-spacing:.2em;color:var(--ink-faint);
+    text-transform:uppercase;margin:0;padding:14px 18px 8px;
+  }
+  .track{
+    display:flex;align-items:center;gap:12px;padding:12px 18px;
+    border-top:1px solid var(--line);
+  }
+  .track:last-child{border-bottom:1px solid var(--line)}
+  .track .lamp{width:11px;height:11px}
+  .track .name{
+    font-size:.72rem;font-weight:800;letter-spacing:.18em;color:var(--ink-dim);
+    width:52px;flex:none;
+  }
+  .track .val{
+    font-family:var(--mono);font-size:1.02rem;font-variant-numeric:tabular-nums;
+    margin-left:auto;text-align:right;
+  }
+  .track .val small{display:block;font-size:.68rem;color:var(--ink-faint);letter-spacing:.08em}
+  .battbar{height:5px;background:#222a2c;margin-top:6px;min-width:130px}
+  .battbar i{display:block;height:100%;background:var(--lock)}
+  .battbar.low i{background:var(--warn)} .battbar.crit i{background:var(--rec)}
+
+  /* ---------- log ---------- */
+  .log{border-top:1px solid var(--line);display:flex;flex-direction:column;min-height:0}
+  .log ol{
+    list-style:none;margin:0;padding:4px 18px 18px;overflow-y:auto;max-height:220px;
+    font-family:var(--mono);font-size:.76rem;line-height:1.7;
+  }
+  .log li{font-variant-numeric:tabular-nums;color:var(--ink-dim);line-height:1.7;overflow-wrap:anywhere}
+  .log li b{color:var(--ink-faint);font-weight:600;margin-right:8px}
+  .log li.ev-rec{color:#ff8f88} .log li.ev-ok{color:#7ddba3} .log li.ev-warn{color:var(--warn)}
+
+  /* ---------- camera sheet ---------- */
+  .camsheet{border-top:1px solid var(--line);padding-bottom:16px}
+  .camsheet .row{padding:8px 18px;display:flex;align-items:center;gap:12px}
+  .camsheet label{font-size:.72rem;font-weight:800;letter-spacing:.14em;color:var(--ink-dim);width:96px;flex:none;text-transform:uppercase}
+  .camsheet select, .camsheet input[type=range]{flex:1;accent-color:var(--warn)}
+  .camsheet select{
+    background:var(--panel-2);color:var(--ink);border:1px solid var(--line);
+    font-family:var(--mono);font-size:.8rem;padding:8px;
+  }
+  .camsheet output{font-family:var(--mono);font-size:.8rem;width:34px;text-align:right}
+  .switch{position:relative;width:46px;height:24px;flex:none;cursor:pointer}
+  .switch input{position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;margin:0}
+  .switch .tr{position:absolute;inset:0;background:#222a2c;border:1px solid var(--line)}
+  .switch .tr::after{
+    content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;background:var(--ink-faint);
+  }
+  .switch input:checked + .tr{background:#3a2c10;border-color:var(--warn)}
+  .switch input:checked + .tr::after{left:24px;background:var(--warn)}
+  .switch input:focus-visible + .tr{outline:2px solid var(--focus);outline-offset:2px}
+  .sheet-off{padding:0 18px;color:var(--ink-faint);font-size:.8rem;line-height:1.6}
+
+  /* ---------- alarm banner ---------- */
+  .alarm{
+    position:absolute;top:4px;left:0;right:0;z-index:4;
+    padding:10px 14px;font-family:var(--mono);font-size:.82rem;font-weight:700;
+    letter-spacing:.1em;text-align:center;display:none;
+  }
+  .alarm.show{display:block}
+  .alarm.warn{background:#2a1e08;color:var(--warn);border-bottom:1px solid #4a3a1e;animation:blink 1.2s steps(2,start) infinite}
+  .alarm.crit{background:#3a0d0b;color:#ffb3ad;border-bottom:1px solid var(--rec);animation:blink 0.7s steps(2,start) infinite}
+  .mini-btn{
+    appearance:none;background:transparent;border:1px solid #3a4244;color:var(--ink-dim);
+    font-family:var(--mono);font-size:.66rem;font-weight:700;letter-spacing:.12em;
+    padding:4px 8px;cursor:pointer;
+  }
+  .mini-btn:hover:not(:disabled){color:var(--ink);border-color:#4a5456}
+  .mini-btn:disabled{opacity:.35;cursor:not-allowed}
+  .posline{display:flex;align-items:center;gap:8px;justify-content:flex-end;margin-top:5px}
+  #vPos{font-family:var(--mono);font-size:.78rem;color:var(--ink)}
+  .log li.ev-mark{color:var(--warn);font-weight:700}
+  /* ---------- night mode (red, preserves night vision) ---------- */
+  body.night{
+    --ground:#060303;--panel:#0e0605;--panel-2:#150a08;--line:#3a2220;
+    --ink:#ffb4a6;--ink-dim:#d98a78;--ink-faint:#a05a4c;
+  }
+  body.night .monitor img{filter:brightness(.82) sepia(.28)}
+
+  footer{
+    border-top:1px solid var(--line);padding:10px 20px;
+    font-family:var(--mono);font-size:.7rem;color:var(--ink-faint);
+    display:flex;gap:18px;flex-wrap:wrap;letter-spacing:.06em;
+  }
+
+  @media (max-width:900px){
+    header{gap:10px;padding:10px 12px}
+    header h1{font-size:.85rem;min-width:0;flex:1 1 100%}
+    .badge{font-size:.62rem;padding:4px 8px}
+    .timecode{font-size:1rem}
+    .connectbar input{flex:1 1 100%;min-width:0}
+    main{grid-template-columns:minmax(0,1fr)}
+    .program{border-right:0;padding:12px}
+    .monitor{max-height:none;aspect-ratio:4/3}
+    .sidebar{border-top:1px solid var(--line)}
+    .timecode{font-size:1.2rem}
+    .transport{position:sticky;bottom:0;z-index:5}
+  }
+</style>
+</head>
+<body>
+<!--
+THESIS: A field instrument, not a dashboard. Every critical state reads at 3 meters in sunlight with zero touches; the category-default OSD-everywhere look is refused.
+OWN-WORLD: Daylight-LCD instrument. Near-black ground, tabular mono data, red only for armed/recording, green only for locked, amber only for degraded. Track-sheet rows, tally borders, transport bar.
+STORY: Builder connects the ESP32-CAM hotspot, watches program video, arms then records, grabs snapshots, tunes exposure, reads APM link/GPS/battery/mode — and trusts the lamps.
+FIRST VIEWPORT: Program monitor large left with tally + OSD margin strip; right track sheet LINK/REC/GPS/BATT/MODE; transport bar with running timecode, ARM, REC, SNAPSHOT.
+FORM: Assigned direction 6 of 7, seed a321afcf, raised by transit labels, folio register, orienteering truth. Code-led single file.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+-->
+<header>
+  <h1>FPV-1 <span class="unit">Ground Station</span></h1>
+  <span class="badge demo" id="feedBadge"><span class="lamp warn" id="feedLamp"></span><span id="feedLabel">Demo feed</span></span>
+  <button class="btn" id="btnNight" style="padding:8px 12px" aria-pressed="false">Night</button>
+  <span class="timecode" id="clock" aria-label="session time">00:00:00</span>
+</header>
+
+<main>
+  <section class="program" aria-label="program monitor">
+    <div class="monitor" id="monitor">
+      <div class="tally"></div>
+      <div class="alarm" id="alarm" role="alert"></div>
+      <img id="stream" alt="ESP32-CAM live stream">
+      <div class="scrim" id="scrim">
+        <span id="scrimArt"></span>
+        <h2 id="scrimTitle">No signal</h2>
+        <p id="scrimBody">Join the <code>ESP32-CAM</code> WiFi hotspot (WPA2 key <code>12345678</code>), confirm the stream URL below, then press <code>Connect</code>.</p>
+      </div>
+      <div class="rec-dot"><i></i><span id="recTime">REC 00:00</span></div>
+      <div class="osd" id="osd"></div>
+    </div>
+
+    <div class="connectbar">
+      <input id="url" type="url" value="http://192.168.4.1:81/stream" spellcheck="false" aria-label="stream URL">
+      <button class="btn primary" id="btnConnect">Connect</button>
+      <button class="btn" id="btnCam">Camera sheet</button>
+    </div>
+
+    <div class="transport" role="group" aria-label="record transport">
+      <div class="tc"><small>SESSION</small><span id="tcBig">00:00:00</span></div>
+      <button class="btn" id="btnArm">Arm</button>
+      <button class="btn" id="btnRec" disabled>Rec</button>
+      <button class="btn" id="btnSnap" disabled>Snapshot</button>
+      <button class="btn" id="btnMark">Mark</button>
+      <div class="cap-note" id="capNote">Snapshot and record run in-browser from the live frame. If the camera blocks capture, the buttons disable themselves and say why.</div>
+    </div>
+  </section>
+
+  <aside class="sidebar" aria-label="status">
+    <div class="sheet">
+      <h2>Track sheet</h2>
+      <div class="track"><span class="lamp bad" id="lLink"></span><span class="name">Link</span><span class="val" id="vLink">—<small>NOT JOINED</small></span></div>
+      <div class="track"><span class="lamp" id="lRec"></span><span class="name">Rec</span><span class="val" id="vRec">STANDBY<small id="vRecSub">NOT ARMED</small></span></div>
+      <div class="track"><span class="lamp warn" id="lGps"></span><span class="name">GPS</span><span class="val"><span id="vGps">—</span><div class="posline"><span id="vPos">NO POSITION</span><button class="mini-btn" id="btnCopy" disabled>COPY</button></div><small id="vGpsSub">NO FIX</small></span></div>
+      <div class="track"><span class="lamp warn" id="lBatt"></span><span class="name">Batt</span><span class="val"><span id="vBatt">—</span><div class="battbar" id="battBar"><i style="width:0%"></i></div><small id="vBattSub">NO DATA</small></span></div>
+      <div class="track"><span class="lamp" id="lMode"></span><span class="name">Mode</span><span class="val" id="vMode">—<small id="vModeSub">APM LINK DOWN</small></span></div>
+    </div>
+
+    <div class="camsheet" id="camSheet" hidden>
+      <h2>Camera — esp-rc-link livefeed</h2>
+      <div class="row"><label for="selRes">Framesize</label>
+        <select id="selRes">
+          <option value="15">UXGA 1600×1200</option>
+          <option value="14">SXGA 1280×1024</option>
+          <option value="13">HD 1280×720</option>
+          <option value="12">XGA 1024×768</option>
+          <option value="11">SVGA 800×600</option>
+          <option value="10">VGA 640×480</option>
+          <option value="9">HVGA 480×320</option>
+          <option value="8">CIF 400×296</option>
+          <option value="6" selected>QVGA 320×240</option>
+          <option value="5">240×240</option>
+          <option value="4">HQVGA 240×176</option>
+          <option value="3">QCIF 176×144</option>
+          <option value="1">QQVGA 160×120</option>
+        </select>
+      </div>
+      <div class="row"><label for="rngBright">Bright</label><input type="range" id="rngBright" min="-2" max="2" step="1" value="0"><output id="outBright">0</output></div>
+      <div class="row"><label for="rngExp">Exposure</label><input type="range" id="rngExp" min="0" max="1200" step="20" value="300"><output id="outExp">300</output></div>
+      <div class="row"><label for="rngTorch">Torch LED</label><input type="range" id="rngTorch" min="0" max="255" step="5" value="0"><output id="outTorch">0</output></div>
+      <p class="sheet-off" id="camNote">Settings send to the camera only while connected. Defaults follow the esp-rc-link firmware boot state (QVGA, torch off).</p>
+    </div>
+
+    <div class="log">
+      <h2>Cue sheet</h2>
+      <ol id="logList"></ol>
+    </div>
+  </aside>
+</main>
+
+<footer>
+  <span>AP HOTSPOT · MJPEG · FIELD RANGE ≈ TENS OF METERS</span>
+  <span id="bridgeNote">TELEMETRY BRIDGE: NOT FOUND (DEMO VALUES)</span>
+</footer>
+
+<canvas id="frame" hidden></canvas>
+
+<script>
+"use strict";
+/* ---------- helpers ---------- */
+const $ = id => document.getElementById(id);
+const t0 = Date.now();
+const pad = n => String(n).padStart(2,"0");
+function stamp(d){
+  d = d || new Date();
+  return d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + "_" + pad(d.getHours()) + pad(d.getMinutes()) + pad(d.getSeconds());
+}
+function clockStr(ms){
+  const s = Math.floor(ms/1000);
+  return pad(Math.floor(s/3600)) + ":" + pad(Math.floor(s/60)%60) + ":" + pad(s%60);
+}
+function log(msg, cls){
+  const li = document.createElement("li");
+  if (cls) li.className = cls;
+  const b = document.createElement("b");
+  b.textContent = clockStr(Date.now()-t0);
+  li.appendChild(b);
+  li.appendChild(document.createTextNode(msg));
+  const list = $("logList");
+  list.prepend(li);
+  while (list.children.length > 60) list.removeChild(list.lastChild);
+}
+function setLamp(el, state){ el.className = "lamp" + (state ? " " + state : ""); }
+
+/* ---------- clock ---------- */
+setInterval(() => {
+  const c = clockStr(Date.now()-t0);
+  $("clock").textContent = c;
+  $("tcBig").textContent = c;
+}, 250);
+
+/* ---------- state ---------- */
+const S = {
+  connected:false, streamBase:"", caps:{snap:false, rec:false},
+  armed:false, recording:false, recStart:0, recTimer:null, mr:null, chunks:[],
+  live:false, demo:{sats:0, fix:false, batt:12.4, mode:"STABILIZE", alt:0, spd:0}
+};
+
+/* ---------- scrim states ---------- */
+function scrim(state, title, body){
+  const m = $("monitor");
+  m.classList.toggle("live", state === "live");
+  const art = $("scrimArt");
+  if (state === "loading"){
+    art.innerHTML = '<span class="spin" style="display:block"></span>';
+  } else {
+    art.innerHTML = '<svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="13" rx="1"/><path d="M2 9h20M6 5v4M10 5v4M2 18l3-3 3 3 3-3 3 3 3-3 3 3"/></svg>';
+  }
+  $("scrimTitle").textContent = title;
+  $("scrimBody").innerHTML = body;
+}
+
+/* ---------- stream connect ---------- */
+function camBase(){
+  try { const u = new URL($("url").value.trim()); return u.origin; }
+  catch(e){ return ""; }
+}
+function setLinked(on, detail){
+  S.connected = on;
+  $("btnConnect").textContent = on ? "Disconnect" : "Connect";
+  setLamp($("lLink"), on ? "on" : "bad");
+  $("vLink").innerHTML = on ? ('LINKED<small>' + detail + '</small>') : '—<small>NOT JOINED</small>';
+}
+$("btnConnect").addEventListener("click", () => {
+  if (S.connected){ disconnect("operator disconnect"); return; }
+  const url = $("url").value.trim();
+  if (!url){ scrim("empty","No signal",'Type the camera stream URL, then press <code>Connect</code>.'); return; }
+  S.streamBase = camBase();
+  scrim("loading","Tuning…",'Opening the MJPEG stream. First frame can take a few seconds on the CAM hotspot.');
+  const img = $("stream");
+  const to = setTimeout(() => {
+    if (!S.connected){
+      scrim("empty","Camera unreachable",
+        'The camera did not answer. Recovery: 1. Join the <code>ESP32-CAM</code> WiFi network (key <code>12345678</code>). 2. Open <code>' +
+        S.streamBase + '</code> in a tab. 3. Press Connect again.');
+      log("connect timeout " + S.streamBase, "ev-warn");
+    }
+  }, 12000);
+  img.onload = null;
+  img.onerror = () => {
+    clearTimeout(to);
+    scrim("empty","Stream refused",
+      'The URL did not return video. Recovery: check the URL ends in <code>:81/stream</code> for stock CameraWebServer, then retry.');
+    log("stream error", "ev-warn");
+  };
+  img.src = url;
+  /* poll: MJPEG img has no load event for streams; treat naturalWidth as proof */
+  const probe = setInterval(() => {
+    if (img.naturalWidth > 0){
+      clearInterval(probe); clearTimeout(to);
+      onStreamLive();
+    }
+  }, 400);
+  setTimeout(() => clearInterval(probe), 12000);
+});
+function onStreamLive(){
+  setLinked(true, $("stream").naturalWidth + "×" + $("stream").naturalHeight);
+  delete $("alarm").dataset.sticky;
+  clearAlarm();
+  scrim("live");
+  log("video locked " + $("stream").naturalWidth + "x" + $("stream").naturalHeight, "ev-ok");
+  probeCapture();
+  syncCamStatus();
+}
+function disconnect(why){
+  const wasHot = S.armed || S.recording;
+  S.stream.src = "";
+  setLinked(false);
+  stopRec(true);
+  disarm(true);
+  if (wasHot){
+    $("alarm").dataset.sticky = "1";
+    showAlarm("VIDEO LINK DOWN — CHECK AIRCRAFT", "warn");
+    buzz("vlink", 2, 660);
+  }
+  scrim("empty","No signal",'Join the <code>ESP32-CAM</code> WiFi hotspot (key <code>12345678</code>), confirm the stream URL, then press <code>Connect</code>.');
+  log("link down — " + why);
+}
+
+/* ---------- capture capability probe (CORS taint test) ---------- */
+function probeCapture(){
+  const img = $("stream"), cv = $("frame");
+  const ok = {snap:false, rec:false};
+  try{
+    cv.width = 64; cv.height = 64;
+    const cx = cv.getContext("2d");
+    cx.drawImage(img, 0, 0, 64, 64);
+    cx.getImageData(0, 0, 1, 1);
+    ok.snap = true;
+    ok.rec = (typeof MediaRecorder !== "undefined");
+    try{ cv.captureStream(4); }catch(e){ ok.rec = false; }
+  }catch(e){ /* tainted: stock firmware sends no CORS headers */ }
+  S.caps = ok;
+  $("btnSnap").disabled = !ok.snap;
+  $("btnRec").disabled = !ok.rec || !S.armed;
+  $("capNote").innerHTML = ok.snap
+    ? "Capture path open: snapshots save JPEG, record saves WebM from the live frame."
+    : 'Camera blocks in-browser capture (no CORS headers). Snapshots and record are disabled — point <code>VLC → Open Network Stream</code> at the URL to record instead.';
+  if (!ok.snap) log("capture blocked by camera (CORS) — use VLC to record", "ev-warn");
+  else log("capture path open", "ev-ok");
+}
+
+/* ---------- camera status sync (CORS open on esp-rc-link firmware) ---------- */
+async function syncCamStatus(){
+  try{
+    const r = await fetch(S.streamBase + "/status", {cache:"no-store"});
+    if (!r.ok) throw new Error(r.status);
+    const j = await r.json();
+    const sel = $("selRes");
+    const opt = sel.querySelector('option[value="' + j.framesize + '"]');
+    if (opt){ sel.value = String(j.framesize); log("camera status synced — " + opt.text, "ev-ok"); }
+    if (typeof j.led_intensity === "number" && j.led_intensity >= 0){
+      $("rngTorch").value = j.led_intensity;
+      $("outTorch").textContent = j.led_intensity;
+    }
+  }catch(e){ /* status unavailable — sheet stays at defaults */ }
+}
+
+/* ---------- arm / record / snapshot ---------- */
+function disarm(silent){
+  S.armed = false;
+  const b = $("btnArm");
+  b.textContent = "Arm"; b.classList.remove("arm-armed");
+  $("btnRec").disabled = true;
+  setLamp($("lRec"), "");
+  $("vRec").innerHTML = 'STANDBY<small id="vRecSub">NOT ARMED</small>';
+  if (!silent) log("recorder disarmed");
+}
+$("btnArm").addEventListener("click", () => {
+  if (!S.connected){ log("arm refused — no video link", "ev-warn"); return; }
+  if (S.armed){ stopRec(true); disarm(); return; }
+  S.armed = true;
+  const b = $("btnArm");
+  b.textContent = "Armed"; b.classList.add("arm-armed");
+  $("btnRec").disabled = !S.caps.rec;
+  setLamp($("lRec"), "warn");
+  $("vRec").innerHTML = 'ARMED<small id="vRecSub">READY TO RECORD</small>';
+  log("recorder armed", "ev-warn");
+});
+$("btnRec").addEventListener("click", () => {
+  if (S.recording){ stopRec(); return; }
+  if (!S.armed || !S.caps.rec) return;
+  const cv = $("frame"), img = $("stream");
+  cv.width = img.naturalWidth || 640; cv.height = img.naturalHeight || 480;
+  const cx = cv.getContext("2d");
+  const pump = setInterval(() => { try{ cx.drawImage(img, 0, 0, cv.width, cv.height); burnIn(cx, cv.width, cv.height); }catch(e){} }, 100);
+  cv._pump = pump;
+  let stream;
+  try{ stream = cv.captureStream(10); }
+  catch(e){ clearInterval(pump); log("record failed — capture stream refused", "ev-warn"); return; }
+  S.chunks = [];
+  let mr;
+  try{ mr = new MediaRecorder(stream, {mimeType:"video/webm"}); }
+  catch(e){ clearInterval(pump); log("record failed — WebM unsupported", "ev-warn"); return; }
+  mr.ondataavailable = e => { if (e.data.size) S.chunks.push(e.data); };
+  mr.onstop = () => {
+    clearInterval(cv._pump);
+    const blob = new Blob(S.chunks, {type:"video/webm"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "FPV1_" + stamp() + ".webm";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    log("clip saved (" + (blob.size/1048576).toFixed(1) + " MB)", "ev-ok");
+  };
+  S.mr = mr; mr.start(1000);
+  S.recording = true; S.recStart = Date.now();
+  $("monitor").classList.add("recording");
+  $("btnRec").textContent = "Stop"; $("btnRec").classList.add("rec-on");
+  setLamp($("lRec"), "bad");
+  $("vRec").innerHTML = '● REC<small id="vRecSub">WRITING WEBM</small>';
+  S.recTimer = setInterval(() => {
+    const e = clockStr(Date.now()-S.recStart).slice(3);
+    $("recTime").textContent = "REC " + e;
+    const sub = $("vRecSub"); if (sub) sub.textContent = "ELAPSED " + e;
+  }, 500);
+  log("recording started", "ev-rec");
+});
+function stopRec(silent){
+  if (!S.recording) return;
+  S.recording = false;
+  clearInterval(S.recTimer);
+  try{ S.mr.stop(); }catch(e){}
+  $("monitor").classList.remove("recording");
+  $("btnRec").textContent = "Rec"; $("btnRec").classList.remove("rec-on");
+  if (!silent) log("recording stopped");
+}
+$("btnSnap").addEventListener("click", () => {
+  if (!S.caps.snap) return;
+  const img = $("stream"), cv = $("frame");
+  cv.width = img.naturalWidth; cv.height = img.naturalHeight;
+  const cx = cv.getContext("2d");
+  try{ cx.drawImage(img, 0, 0); burnIn(cx, cv.width, cv.height); }
+  catch(e){ log("snapshot failed — frame unreadable", "ev-warn"); return; }
+  cv.toBlob(b => {
+    if (!b){ log("snapshot failed — encode error", "ev-warn"); return; }
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(b);
+    a.download = "FPV1_" + stamp() + ".jpg";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    log("still saved (" + (b.size/1024).toFixed(0) + " KB)", "ev-ok");
+  }, "image/jpeg", 0.92);
+});
+
+/* ---------- camera sheet ---------- */
+$("btnCam").addEventListener("click", () => {
+  const sh = $("camSheet");
+  sh.hidden = !sh.hidden;
+  $("btnCam").textContent = sh.hidden ? "Camera sheet" : "Hide camera";
+});
+function camCtl(v, val){
+  if (!S.connected || !S.streamBase){ log("camera setting refused — not connected", "ev-warn"); return; }
+  fetch(S.streamBase + "/control?var=" + v + "&val=" + val, {mode:"no-cors"}).catch(()=>{});
+}
+$("selRes").addEventListener("change", e => { camCtl("framesize", e.target.value); log("framesize → " + e.target.selectedOptions[0].text); });
+$("rngBright").addEventListener("change", e => { $("outBright").textContent = e.target.value; camCtl("brightness", e.target.value); log("brightness → " + e.target.value); });
+$("rngExp").addEventListener("change", e => { $("outExp").textContent = e.target.value; camCtl("aec_value", e.target.value); log("exposure → " + e.target.value); });
+$("rngTorch").addEventListener("input", e => { $("outTorch").textContent = e.target.value; });
+$("rngTorch").addEventListener("change", e => { camCtl("led_intensity", e.target.value); log("torch LED → " + e.target.value, e.target.value > 0 ? "ev-warn" : ""); });
+
+/* ---------- telemetry: bridge first, demo fallback ---------- */
+/* ---------- alarms (banner + beep, throttled) ---------- */
+let _ac = null;
+const _beepAt = {};
+function buzz(key, times, freq){
+  const now = Date.now();
+  if (now - (_beepAt[key] || 0) < 6000) return;
+  _beepAt[key] = now;
+  try{
+    _ac = _ac || new (window.AudioContext || window.webkitAudioContext)();
+    for (let i = 0; i < times; i++){
+      const o = _ac.createOscillator(), g = _ac.createGain();
+      o.type = "square"; o.frequency.value = freq;
+      const t0 = _ac.currentTime + i * 0.22;
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(0.25, t0 + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+      o.connect(g); g.connect(_ac.destination);
+      o.start(t0); o.stop(t0 + 0.18);
+    }
+  }catch(e){ /* audio locked until first click; banner still shows */ }
+}
+function showAlarm(text, level){
+  const a = $("alarm");
+  a.textContent = text;
+  a.className = "alarm show " + level;
+}
+function clearAlarm(){
+  const a = $("alarm");
+  if (!a.dataset.sticky) a.className = "alarm";
+}
+
+/* ---------- evidence burn-in (timestamp + coords on every saved frame) ---------- */
+function burnIn(cx, w, h){
+  if (!w || !h) return;
+  const t = S.tele || {};
+  const line = stamp() + "  " + ((t.lat != null && t.lon != null)
+    ? (t.lat.toFixed(6) + "," + t.lon.toFixed(6)) : "NO POS") + "  " + (t.mode || "");
+  cx.fillStyle = "rgba(0,0,0,.72)";
+  cx.fillRect(0, h - 30, w, 30);
+  cx.fillStyle = "#fff";
+  cx.font = "600 17px ui-monospace, Menlo, Consolas, monospace";
+  cx.fillText(line, 10, h - 10);
+}
+
+function renderTele(t){
+  S.tele = t;
+  setLamp($("lGps"), t.fix ? "on" : "warn");
+  $("vGps").textContent = t.sats + " SAT";
+  $("vGpsSub").textContent = t.fix ? "3D LOCK" : "NO FIX";
+  const hasPos = (t.lat != null && t.lon != null);
+  $("vPos").textContent = hasPos ? (t.lat.toFixed(6) + ", " + t.lon.toFixed(6)) : "NO POSITION";
+  $("btnCopy").disabled = !hasPos;
+  const pct = Math.max(0, Math.min(100, (t.batt-9.0)/(12.6-9.0)*100));
+  const bar = $("battBar");
+  bar.className = "battbar" + (pct < 20 ? " crit" : pct < 45 ? " low" : "");
+  bar.firstElementChild.style.width = pct + "%";
+  setLamp($("lBatt"), pct < 20 ? "bad" : pct < 45 ? "warn" : "on");
+  $("vBatt").textContent = t.batt.toFixed(1) + " V";
+  $("vBattSub").textContent = pct < 20 ? "LAND NOW" : pct < 45 ? "LOW" : "3S NOMINAL";
+  setLamp($("lMode"), S.live ? "on" : "");
+  $("vMode").innerHTML = t.mode + '<small id="vModeSub">' + (S.live ? "APM LINK UP" : "APM LINK DOWN") + '</small>';
+  $("osd").innerHTML =
+    "<span><b>ALT</b>" + t.alt.toFixed(0) + "m</span>" +
+    "<span><b>SPD</b>" + t.spd.toFixed(1) + "m/s</span>" +
+    "<span><b>SAT</b>" + (t.fix ? '<span class="good">' + t.sats + "</span>" : '<span class="wrn">' + t.sats + "</span>") + "</span>" +
+    "<span><b>BAT</b>" + (pct < 20 ? '<span class="bad">' : "") + t.batt.toFixed(1) + "V" + (pct < 20 ? "</span>" : "") + "</span>" +
+    "<span><b>MODE</b>" + t.mode + "</span>" +
+    "<span><b>POS</b>" + (hasPos ? (t.lat.toFixed(4) + "," + t.lon.toFixed(4)) : "—") + "</span>";
+  if (S.live && pct < 20){ showAlarm("BATTERY CRITICAL — LAND NOW", "crit"); buzz("batt", 3, 880); }
+  else if (S.live && !t.fix){ showAlarm("GPS FIX LOST — HOLD POSITION", "warn"); buzz("gps", 2, 660); }
+  else clearAlarm();
+}
+function setFeed(live){
+  S.live = live;
+  const b = $("feedBadge");
+  b.className = "badge " + (live ? "live" : "demo");
+  $("feedLamp").className = "lamp " + (live ? "on" : "warn");
+  $("feedLabel").textContent = live ? "Live telemetry" : "Demo feed";
+  $("bridgeNote").textContent = live
+    ? "TELEMETRY BRIDGE: CONNECTED (127.0.0.1:5000)"
+    : "TELEMETRY BRIDGE: NOT FOUND (DEMO VALUES)";
+}
+async function pollBridge(){
+  let t = null, ok = false;
+  try{
+    const r = await fetch("http://127.0.0.1:5000/api/telemetry", {cache:"no-store"});
+    if (r.ok){ t = await r.json(); ok = (t.age == null || t.age < 3); }
+  }catch(e){ ok = false; }
+  if (ok){
+    if (!S.live){ setFeed(true); log("telemetry bridge connected — live values", "ev-ok"); }
+    renderTele(t);
+  }else{
+    if (S.live){ setFeed(false); log("telemetry link lost — demo values", "ev-warn"); }
+    const d = S.demo;
+    d.sats = 4 + Math.floor(Date.now()/8000)%6;
+    d.fix = (Math.floor(Date.now()/20000)%2 === 0);
+    d.batt = Math.max(10.5, d.batt - 0.0004);
+    d.alt = 2 + Math.sin(Date.now()/9000)*2;
+    d.spd = 0.4 + Math.abs(Math.sin(Date.now()/5000));
+    d.lat = null; d.lon = null;
+    renderTele(d);
+  }
+}
+
+/* ---------- MARK / COPY / NIGHT ---------- */
+$("btnMark").addEventListener("click", () => {
+  const t = S.tele || {};
+  const where = (t.lat != null && t.lon != null) ? (" @ " + t.lat.toFixed(6) + "," + t.lon.toFixed(6)) : "";
+  log("MARK " + clockStr(Date.now()-t0) + where + (S.recording ? " [ON CLIP]" : ""), "ev-mark");
+  if (S.caps.snap) $("btnSnap").click();
+  else log("mark kept in log only — no video link for still", "ev-warn");
+});
+$("btnCopy").addEventListener("click", async () => {
+  const s = $("vPos").textContent;
+  try{ await navigator.clipboard.writeText(s); log("coords copied: " + s, "ev-ok"); }
+  catch(e){
+    const ta = document.createElement("textarea");
+    ta.value = s; document.body.appendChild(ta); ta.select();
+    try{ document.execCommand("copy"); log("coords copied: " + s, "ev-ok"); }
+    catch(_){ log("copy blocked — write down: " + s, "ev-warn"); }
+    ta.remove();
+  }
+});
+$("btnNight").addEventListener("click", () => {
+  const on = document.body.classList.toggle("night");
+  $("btnNight").textContent = on ? "Day" : "Night";
+  $("btnNight").setAttribute("aria-pressed", on ? "true" : "false");
+  log("night vision " + (on ? "on — red only" : "off"));
+});
+setInterval(pollBridge, 1000);
+pollBridge();
+log("ground station ready — bridge contract: GET http://127.0.0.1:5000/api/telemetry → {fix,sats,batt,mode,alt,spd,lat,lon}");
+log("join ESP32-CAM hotspot (key 12345678), then Connect");
+</script>
+</body>
+</html>

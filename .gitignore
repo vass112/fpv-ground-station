@@ -1,0 +1,8 @@
+# PlatformIO
+.pio/
+# Python
+__pycache__/
+*.pyc
+# Local-only
+.impeccable/
+*.pid
